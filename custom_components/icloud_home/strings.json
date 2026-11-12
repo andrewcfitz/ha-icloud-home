@@ -1,0 +1,70 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect iCloud Contacts",
+        "description": "Use an app-specific password from account.apple.com (Sign-In and Security > App-Specific Passwords), not your Apple ID password. It only reaches iCloud services like Contacts and can be revoked at any time.",
+        "data": {
+          "apple_id": "Apple ID",
+          "app_password": "App-specific password"
+        }
+      },
+      "card": {
+        "title": "Choose your contact card",
+        "description": "Pick the card whose Home address should follow your location. Usually your own (the \"My Card\" in Contacts).",
+        "data": {
+          "card_url": "Contact"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate iCloud",
+        "description": "iCloud rejected the app-specific password for {apple_id}. Create a new one and enter it here.",
+        "data": {
+          "app_password": "App-specific password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "iCloud rejected the Apple ID or app-specific password.",
+      "cannot_connect": "Could not reach iCloud Contacts.",
+      "no_contacts": "No contacts were found on this account."
+    },
+    "abort": {
+      "already_configured": "This Apple ID is already set up.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "services": {
+    "set_home_address": {
+      "name": "Set home address",
+      "description": "Writes the Home address on the chosen iCloud contact. The address comes from explicit fields, an entity's address attributes (such as a Companion app geocoded location sensor), or coordinates reverse-geocoded with OpenStreetMap.",
+      "fields": {
+        "config_entry_id": {
+          "name": "iCloud account",
+          "description": "Which account to update. Only needed if more than one is set up."
+        },
+        "entity_id": {
+          "name": "Entity",
+          "description": "A geocoded location sensor (address used directly) or a device tracker or person (coordinates reverse-geocoded)."
+        },
+        "latitude": {
+          "name": "Latitude",
+          "description": "Reverse-geocode these coordinates instead of an entity."
+        },
+        "longitude": {
+          "name": "Longitude",
+          "description": "Reverse-geocode these coordinates instead of an entity."
+        },
+        "street": { "name": "Street", "description": "Overrides the resolved street." },
+        "city": { "name": "City", "description": "Overrides the resolved city." },
+        "state": { "name": "State", "description": "Overrides the resolved state or region." },
+        "postal_code": { "name": "Postal code", "description": "Overrides the resolved postal code." },
+        "country": { "name": "Country", "description": "Overrides the resolved country." },
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Resolve and return the address without writing it to iCloud."
+        }
+      }
+    }
+  }
+}

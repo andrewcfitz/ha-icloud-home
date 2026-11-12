@@ -1,0 +1,13 @@
+{
+  "domain": "icloud_home",
+  "name": "iCloud Home Address",
+  "codeowners": ["@andrewcfitz"],
+  "config_flow": true,
+  "dependencies": ["diagnostics"],
+  "documentation": "https://github.com/andrewcfitz/ha-icloud-home",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/andrewcfitz/ha-icloud-home/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

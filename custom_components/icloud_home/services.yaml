@@ -1,0 +1,41 @@
+set_home_address:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: icloud_home
+    entity_id:
+      selector:
+        entity:
+          domain: [sensor, device_tracker, person, zone]
+    latitude:
+      selector:
+        number:
+          min: -90
+          max: 90
+          step: any
+    longitude:
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: any
+    street:
+      selector:
+        text:
+    city:
+      selector:
+        text:
+    state:
+      selector:
+        text:
+    postal_code:
+      selector:
+        text:
+    country:
+      selector:
+        text:
+    dry_run:
+      default: false
+      selector:
+        boolean:
