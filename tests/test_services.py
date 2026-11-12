@@ -145,6 +145,7 @@ async def test_diagnostics_redact_credentials(hass: HomeAssistant, aioclient_moc
     assert "pat@example.com" not in str(diag)
     assert diag["contacts"] == {
         "address_books": 2,
+        "address_books_failed": 0,
         "card_urls": 7,
         "cards_fetched": 7,
         "groups": 1,

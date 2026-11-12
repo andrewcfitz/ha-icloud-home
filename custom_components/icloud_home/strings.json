@@ -26,7 +26,7 @@
     },
     "error": {
       "invalid_auth": "iCloud rejected the Apple ID or app-specific password.",
-      "cannot_connect": "Could not reach iCloud Contacts.",
+      "cannot_connect": "Could not list iCloud contacts ({error}). Details are in the Home Assistant log.",
       "no_contacts": "No contacts were found on this account."
     },
     "abort": {

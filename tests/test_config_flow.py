@@ -58,6 +58,35 @@ async def test_user_flow_asks_for_credentials_then_card(hass: HomeAssistant, aio
     assert all(h and h["Authorization"].startswith("Basic ") for _, _, _, h in aioclient_mock.mock_calls)
     assert not any("abcd" in str(url) for _, url, _, _ in aioclient_mock.mock_calls)
 
+    # v0.1.1 regression: multiget hrefs must be server paths, never absolute URLs.
+    reports = [data for m, _, data, _ in aioclient_mock.mock_calls if m == "REPORT"]
+    assert reports
+    assert all(b"<d:href>/1/carddav/" in d and b"https://" not in d for d in reports)
+
+
+async def test_one_broken_address_book_does_not_block_setup(hass: HomeAssistant, aioclient_mock):
+    mock_icloud(aioclient_mock, broken_book2=True)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDS)
+    assert result["step_id"] == "card"
+    labels = [o["label"] for o in result["data_schema"].schema[CONF_CARD_URL].config["options"]]
+    assert "Pat Tester" in labels
+    assert "Acme RV Park" not in labels
+
+
+async def test_cannot_connect_shows_the_reason(hass: HomeAssistant, aioclient_mock):
+    mock_icloud(aioclient_mock, broken_books=True)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDS)
+    assert result["errors"] == {"base": "cannot_connect"}
+    reason = result["description_placeholders"]["error"]
+    assert "HTTP" in reason
+    assert "icloud.com" not in reason
+
 
 async def test_user_flow_bad_password(hass: HomeAssistant, aioclient_mock):
     mock_icloud(aioclient_mock, auth_ok=False)

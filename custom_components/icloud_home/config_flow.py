@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from typing import Any
 
 import aiohttp
@@ -20,8 +21,10 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .carddav import AuthError, CardDAVClient, CardDAVError
+from .carddav import AuthError, CardDAVClient, CardDAVError, describe
 from .const import CONF_APP_PASSWORD, CONF_APPLE_ID, CONF_CARD_NAME, CONF_CARD_URL, DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 PASSWORD = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
@@ -42,6 +45,7 @@ class ICloudHomeConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        placeholders = {"error": ""}
         if user_input is not None:
             user_input[CONF_APPLE_ID] = user_input[CONF_APPLE_ID].strip()
             await self.async_set_unique_id(user_input[CONF_APPLE_ID].lower())
@@ -50,8 +54,10 @@ class ICloudHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 contacts = await self._client(user_input).list_contacts()
             except AuthError:
                 errors["base"] = "invalid_auth"
-            except (CardDAVError, aiohttp.ClientError, TimeoutError):
+            except (CardDAVError, aiohttp.ClientError, TimeoutError) as err:
+                _LOGGER.warning("Listing iCloud contacts failed: %r", err)
                 errors["base"] = "cannot_connect"
+                placeholders["error"] = describe(err)
             else:
                 if contacts:
                     self._credentials, self._contacts = user_input, contacts
@@ -67,6 +73,7 @@ class ICloudHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 user_input,
             ),
             errors=errors,
+            description_placeholders=placeholders,
         )
 
     async def async_step_card(
@@ -100,20 +107,23 @@ class ICloudHomeConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         entry = self._get_reauth_entry()
         errors: dict[str, str] = {}
+        placeholders = {CONF_APPLE_ID: entry.data[CONF_APPLE_ID], "error": ""}
         if user_input is not None:
             data = {**entry.data, CONF_APP_PASSWORD: user_input[CONF_APP_PASSWORD]}
             try:
                 await self._client(data).get_card(entry.data[CONF_CARD_URL])
             except AuthError:
                 errors["base"] = "invalid_auth"
-            except (CardDAVError, aiohttp.ClientError, TimeoutError):
+            except (CardDAVError, aiohttp.ClientError, TimeoutError) as err:
+                _LOGGER.warning("Re-checking the iCloud contact failed: %r", err)
                 errors["base"] = "cannot_connect"
+                placeholders["error"] = describe(err)
             else:
                 return self.async_update_reload_and_abort(entry, data=data)
 
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=vol.Schema({vol.Required(CONF_APP_PASSWORD): PASSWORD}),
-            description_placeholders={CONF_APPLE_ID: entry.data[CONF_APPLE_ID]},
+            description_placeholders=placeholders,
             errors=errors,
         )

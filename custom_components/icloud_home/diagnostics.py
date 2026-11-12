@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .carddav import describe
 from .const import CONF_APP_PASSWORD, CONF_APPLE_ID, CONF_CARD_NAME, CONF_CARD_URL
 
 TO_REDACT = {CONF_APP_PASSWORD, CONF_APPLE_ID, CONF_CARD_NAME, CONF_CARD_URL}
@@ -23,5 +23,5 @@ async def async_get_config_entry_diagnostics(
         listing: dict[str, Any] = {**stats, "listed": len(contacts)}
         listing["selected_card_found"] = entry.data[CONF_CARD_URL] in {u for _, u in contacts}
     except Exception as err:  # noqa: BLE001 - diagnostics should report, not raise
-        listing = {"error": re.sub(r"https?://\S+", "<url>", f"{type(err).__name__}: {err}")}
+        listing = {"error": describe(err)}
     return {"entry": async_redact_data(dict(entry.data), TO_REDACT), "contacts": listing}

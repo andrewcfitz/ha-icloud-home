@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
-from urllib.parse import urljoin
+import logging
+import re
+from urllib.parse import unquote, urljoin, urlsplit
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
@@ -12,10 +14,23 @@ import aiohttp
 from . import vcard
 from .const import ICLOUD_ROOT
 
+_LOGGER = logging.getLogger(__name__)
+
 NS = {"d": "DAV:", "c": "urn:ietf:params:xml:ns:carddav"}
 XMLNS = 'xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"'
 REDIRECTS = (301, 302, 307, 308)
 TIMEOUT = aiohttp.ClientTimeout(total=30)
+MAX_FALLBACK_GETS = 25
+
+
+def _path(url: str) -> str:
+    return unquote(urlsplit(url).path)
+
+
+def describe(err: BaseException) -> str:
+    """Error text safe to show or share: iCloud URLs embed the account ID."""
+    text = re.sub(r"https?://\S+", "<url>", str(err)) or "no details"
+    return f"{type(err).__name__}: {text}"
 
 
 class CardDAVError(Exception):
@@ -139,11 +154,15 @@ class CardDAVClient:
         ]
 
     async def _fetch_cards(self, book: str, urls: list[str]) -> dict[str, str]:
-        """Fetch vCards by multiget, falling back to GET for any it skips."""
+        """Fetch vCards by multiget, falling back to GET for a few it skips."""
+        by_path = {_path(u): u for u in urls}
         cards: dict[str, str] = {}
-        for i in range(0, len(urls), 50):
-            chunk = "".join(f"<d:href>{xml_escape(u)}</d:href>" for u in urls[i : i + 50])
-            tree, base = await self._xml(
+        # Multiget hrefs go back exactly as the server listed them: encoded
+        # paths, not absolute URLs.
+        paths = [urlsplit(u).path for u in urls]
+        for i in range(0, len(paths), 50):
+            chunk = "".join(f"<d:href>{xml_escape(p)}</d:href>" for p in paths[i : i + 50])
+            tree, _ = await self._xml(
                 "REPORT",
                 book,
                 f"<c:addressbook-multiget {XMLNS}><d:prop><c:address-data/></d:prop>"
@@ -152,14 +171,17 @@ class CardDAVClient:
             )
             for resp in tree.findall("d:response", NS):
                 data = resp.find(".//c:address-data", NS)
-                if data is not None and data.text:
-                    cards[urljoin(base, self._href(resp, "d:href"))] = data.text
-        for url in urls:
-            if url not in cards:
-                try:
-                    cards[url], _ = await self.get_card(url)
-                except CardDAVError:
-                    continue
+                url = by_path.get(_path(self._href(resp, "d:href")))
+                if url and data is not None and data.text:
+                    cards[url] = data.text
+        missing = [u for u in urls if u not in cards]
+        # A handful of stragglers are worth a GET each; hundreds mean the
+        # multiget itself misbehaved, and per-card GETs would stall the flow.
+        for url in missing[:MAX_FALLBACK_GETS]:
+            try:
+                cards[url], _ = await self.get_card(url)
+            except (CardDAVError, aiohttp.ClientError, TimeoutError):
+                continue
         return cards
 
     async def list_contacts(self) -> list[tuple[str, str]]:
@@ -168,15 +190,32 @@ class CardDAVClient:
         return contacts
 
     async def list_contacts_with_stats(self) -> tuple[list[tuple[str, str]], dict[str, int]]:
-        stats = {"address_books": 0, "card_urls": 0, "cards_fetched": 0, "groups": 0, "unnamed": 0}
+        stats = {
+            "address_books": 0,
+            "address_books_failed": 0,
+            "card_urls": 0,
+            "cards_fetched": 0,
+            "groups": 0,
+            "unnamed": 0,
+        }
         contacts: list[tuple[str, str]] = []
+        last_error: Exception | None = None
         for book in await self.discover_addressbooks():
             stats["address_books"] += 1
-            urls = await self._card_hrefs(book)
+            try:
+                urls = await self._card_hrefs(book)
+                # iCloud's addressbook-query is unreliable, so fetch the cards
+                # and read names locally.
+                cards = await self._fetch_cards(book, urls)
+            except AuthError:
+                raise
+            except (CardDAVError, aiohttp.ClientError, TimeoutError) as err:
+                # One broken (e.g. shared or read-only) book shouldn't hide the rest.
+                _LOGGER.warning("Skipping address book %s: %s", book, err)
+                stats["address_books_failed"] += 1
+                last_error = err
+                continue
             stats["card_urls"] += len(urls)
-            # iCloud's addressbook-query is unreliable, so fetch the cards
-            # and read names locally.
-            cards = await self._fetch_cards(book, urls)
             stats["cards_fetched"] += len(cards)
             for url, data in cards.items():
                 if vcard.is_group(data):
@@ -185,6 +224,8 @@ class CardDAVClient:
                     contacts.append((name, url))
                 else:
                     stats["unnamed"] += 1
+        if last_error is not None and stats["address_books_failed"] == stats["address_books"]:
+            raise last_error
         return sorted(contacts, key=lambda c: c[0].lower()), stats
 
     async def get_card(self, url: str) -> tuple[str, str | None]:

@@ -9,7 +9,7 @@ CONF_CARD_NAME = "card_name"
 
 ICLOUD_ROOT = "https://contacts.icloud.com/"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
-USER_AGENT = "ha-icloud-home/0.1.1"
+USER_AGENT = "ha-icloud-home/0.1.2"
 
 ADDRESS_FIELDS = ("street", "city", "state", "postal_code", "country")
 

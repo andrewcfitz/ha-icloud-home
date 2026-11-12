@@ -64,11 +64,22 @@ def multistatus(*responses: str) -> str:
     )
 
 
-def mock_icloud(aioclient_mock: AiohttpClientMocker, me: str = ME, auth_ok: bool = True) -> None:
+def mock_icloud(
+    aioclient_mock: AiohttpClientMocker,
+    me: str = ME,
+    auth_ok: bool = True,
+    broken_book2: bool = False,
+    broken_books: bool = False,
+) -> None:
     if not auth_ok:
         aioclient_mock.request("PROPFIND", ROOT, status=401)
         aioclient_mock.get(ME_URL, status=401)
         return
+    # Registered first so they win over the working mocks below.
+    if broken_book2 or broken_books:
+        aioclient_mock.request("PROPFIND", BOOK2, status=403)
+    if broken_books:
+        aioclient_mock.request("PROPFIND", BOOK, status=500)
     aioclient_mock.request("PROPFIND", ROOT, status=301, headers={"Location": f"{HOST}/"})
     aioclient_mock.request(
         "PROPFIND",
