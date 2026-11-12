@@ -47,6 +47,25 @@ def full_name(vcard: str) -> str | None:
     return _unescape(m.group(1).strip()) if m else None
 
 
+N_LINE = re.compile(r"^N(?:;[^:\n]*)?:(.*)$", re.M | re.I)
+ORG_LINE = re.compile(r"^ORG(?:;[^:\n]*)?:(.*)$", re.M | re.I)
+
+
+def display_name(vcard: str) -> str | None:
+    """FN, else the structured name, else the organization."""
+    if name := full_name(vcard):
+        return name
+    text = unfold(vcard)
+    if m := N_LINE.search(text):
+        family, given, *_ = [*re.split(r"(?<!\\);", m.group(1).strip()), "", ""]
+        if name := " ".join(_unescape(p) for p in (given, family) if p):
+            return name
+    if m := ORG_LINE.search(text):
+        if org := _unescape(re.split(r"(?<!\\);", m.group(1).strip())[0]):
+            return org
+    return None
+
+
 def is_group(vcard: str) -> bool:
     return bool(GROUP_KIND.search(unfold(vcard)))
 

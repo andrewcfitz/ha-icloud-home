@@ -19,7 +19,9 @@ pytest_plugins = "pytest_homeassistant_custom_component"
 
 ROOT = "https://contacts.icloud.com/"
 HOST = "https://p01-contacts.icloud.com"
-BOOK = f"{HOST}/1/carddav/card/"
+# iCloud's addressbook-home-set carries an explicit :443, so real card URLs do too.
+BOOK = f"{HOST}:443/1/carddav/card/"
+BOOK2 = f"{HOST}:443/1/carddav/shared/"
 ME_URL = f"{BOOK}me.vcf"
 
 ME = (
@@ -34,7 +36,25 @@ GROUP = (
     "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Family\r\n"
     "X-ADDRESSBOOKSERVER-KIND:group\r\nEND:VCARD\r\n"
 )
-CARDS = {ME_URL: ME, f"{BOOK}other.vcf": OTHER, f"{BOOK}group.vcf": GROUP}
+N_ONLY = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Smith;Jo;;;\r\nEND:VCARD\r\n"
+ORG_ONLY = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nORG:Acme RV Park;\r\nEND:VCARD\r\n"
+NAMELESS = "BEGIN:VCARD\r\nVERSION:3.0\r\nTEL:555\r\nEND:VCARD\r\n"
+SKIPPED = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Zed Skipped\r\nEND:VCARD\r\n"
+CARDS = {
+    ME_URL: ME,
+    f"{BOOK}other.vcf": OTHER,
+    f"{BOOK}group.vcf": GROUP,
+    f"{BOOK}nonly.vcf": N_ONLY,
+    f"{BOOK}nameless.vcf": NAMELESS,
+    f"{BOOK}skipped.vcf": SKIPPED,
+}
+# Multiget leaves this one out; the client must GET it individually.
+MULTIGET_OMITS = f"{BOOK}skipped.vcf"
+CARDS2 = {f"{BOOK2}org.vcf": ORG_ONLY}
+
+
+def _path(url: str) -> str:
+    return url.removeprefix(f"{HOST}:443")
 
 
 def multistatus(*responses: str) -> str:
@@ -79,32 +99,34 @@ def mock_icloud(aioclient_mock: AiohttpClientMocker, me: str = ME, auth_ok: bool
             "<d:collection/></d:resourcetype></d:prop></d:propstat></d:response>",
             "<d:response><d:href>/1/carddav/card/</d:href><d:propstat><d:prop><d:resourcetype>"
             "<d:collection/><c:addressbook/></d:resourcetype></d:prop></d:propstat></d:response>",
+            "<d:response><d:href>/1/carddav/shared/</d:href><d:propstat><d:prop><d:resourcetype>"
+            "<d:collection/><c:addressbook/></d:resourcetype></d:prop></d:propstat></d:response>",
         ),
     )
-    aioclient_mock.request(
-        "PROPFIND",
-        BOOK,
-        status=207,
-        text=multistatus(
-            "<d:response><d:href>/1/carddav/card/</d:href></d:response>",
-            *(
-                f"<d:response><d:href>{url.removeprefix(HOST)}</d:href></d:response>"
-                for url in CARDS
+    for book, cards in ((BOOK, CARDS), (BOOK2, CARDS2)):
+        aioclient_mock.request(
+            "PROPFIND",
+            book,
+            status=207,
+            text=multistatus(
+                f"<d:response><d:href>{_path(book)}</d:href></d:response>",
+                *(f"<d:response><d:href>{_path(url)}</d:href></d:response>" for url in cards),
             ),
-        ),
-    )
-    aioclient_mock.request(
-        "REPORT",
-        BOOK,
-        status=207,
-        text=multistatus(
-            *(
-                f"<d:response><d:href>{url.removeprefix(HOST)}</d:href><d:propstat><d:prop>"
-                f"<c:address-data>{card}</c:address-data></d:prop></d:propstat></d:response>"
-                for url, card in CARDS.items()
-            )
-        ),
-    )
+        )
+        aioclient_mock.request(
+            "REPORT",
+            book,
+            status=207,
+            text=multistatus(
+                *(
+                    f"<d:response><d:href>{_path(url)}</d:href><d:propstat><d:prop>"
+                    f"<c:address-data>{card}</c:address-data></d:prop></d:propstat></d:response>"
+                    for url, card in cards.items()
+                    if url != MULTIGET_OMITS
+                )
+            ),
+        )
+    aioclient_mock.get(MULTIGET_OMITS, text=SKIPPED)
     aioclient_mock.get(ME_URL, text=me, headers={"ETag": '"e1"'})
     aioclient_mock.put(ME_URL, status=204)
 

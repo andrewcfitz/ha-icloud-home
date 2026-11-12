@@ -92,7 +92,7 @@ class CardDAVClient:
             raise CardDAVError(f"server response is missing {path}")
         return node.text
 
-    async def discover_addressbook(self) -> str:
+    async def discover_addressbooks(self) -> list[str]:
         tree, base = await self._xml(
             "PROPFIND",
             self._root,
@@ -115,32 +115,35 @@ class CardDAVClient:
             f"<d:propfind {XMLNS}><d:prop><d:resourcetype/></d:prop></d:propfind>",
             1,
         )
-        for resp in tree.findall("d:response", NS):
-            if resp.find(".//d:resourcetype/c:addressbook", NS) is not None:
-                return urljoin(base, self._href(resp, "d:href"))
-        raise CardDAVError("no address book found on the account")
+        books = [
+            urljoin(base, self._href(resp, "d:href"))
+            for resp in tree.findall("d:response", NS)
+            if resp.find(".//d:resourcetype/c:addressbook", NS) is not None
+        ]
+        if not books:
+            raise CardDAVError("no address book found on the account")
+        return books
 
-    async def list_contacts(self) -> list[tuple[str, str]]:
-        """Return (full name, card URL) for every contact, groups excluded."""
-        book = await self.discover_addressbook()
+    async def _card_hrefs(self, book: str) -> list[str]:
         tree, base = await self._xml(
             "PROPFIND",
             book,
-            f"<d:propfind {XMLNS}><d:prop><d:getetag/></d:prop></d:propfind>",
+            f"<d:propfind {XMLNS}><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>",
             1,
         )
-        hrefs = [
-            h
-            for h in (self._href(r, "d:href") for r in tree.findall("d:response", NS))
-            if urljoin(base, h).rstrip("/") != book.rstrip("/")
+        return [
+            url
+            for r in tree.findall("d:response", NS)
+            if (url := urljoin(base, self._href(r, "d:href"))).rstrip("/") != book.rstrip("/")
+            and r.find(".//d:resourcetype/d:collection", NS) is None
         ]
 
-        # iCloud's addressbook-query is unreliable, so fetch the cards and
-        # read FN locally.
-        contacts: list[tuple[str, str]] = []
-        for i in range(0, len(hrefs), 100):
-            chunk = "".join(f"<d:href>{xml_escape(h)}</d:href>" for h in hrefs[i : i + 100])
-            tree, mbase = await self._xml(
+    async def _fetch_cards(self, book: str, urls: list[str]) -> dict[str, str]:
+        """Fetch vCards by multiget, falling back to GET for any it skips."""
+        cards: dict[str, str] = {}
+        for i in range(0, len(urls), 50):
+            chunk = "".join(f"<d:href>{xml_escape(u)}</d:href>" for u in urls[i : i + 50])
+            tree, base = await self._xml(
                 "REPORT",
                 book,
                 f"<c:addressbook-multiget {XMLNS}><d:prop><c:address-data/></d:prop>"
@@ -149,11 +152,40 @@ class CardDAVClient:
             )
             for resp in tree.findall("d:response", NS):
                 data = resp.find(".//c:address-data", NS)
-                if data is None or not data.text or vcard.is_group(data.text):
+                if data is not None and data.text:
+                    cards[urljoin(base, self._href(resp, "d:href"))] = data.text
+        for url in urls:
+            if url not in cards:
+                try:
+                    cards[url], _ = await self.get_card(url)
+                except CardDAVError:
                     continue
-                if name := vcard.full_name(data.text):
-                    contacts.append((name, urljoin(mbase, self._href(resp, "d:href"))))
-        return sorted(contacts, key=lambda c: c[0].lower())
+        return cards
+
+    async def list_contacts(self) -> list[tuple[str, str]]:
+        """Return (display name, card URL) for every contact, groups excluded."""
+        contacts, _ = await self.list_contacts_with_stats()
+        return contacts
+
+    async def list_contacts_with_stats(self) -> tuple[list[tuple[str, str]], dict[str, int]]:
+        stats = {"address_books": 0, "card_urls": 0, "cards_fetched": 0, "groups": 0, "unnamed": 0}
+        contacts: list[tuple[str, str]] = []
+        for book in await self.discover_addressbooks():
+            stats["address_books"] += 1
+            urls = await self._card_hrefs(book)
+            stats["card_urls"] += len(urls)
+            # iCloud's addressbook-query is unreliable, so fetch the cards
+            # and read names locally.
+            cards = await self._fetch_cards(book, urls)
+            stats["cards_fetched"] += len(cards)
+            for url, data in cards.items():
+                if vcard.is_group(data):
+                    stats["groups"] += 1
+                elif name := vcard.display_name(data):
+                    contacts.append((name, url))
+                else:
+                    stats["unnamed"] += 1
+        return sorted(contacts, key=lambda c: c[0].lower()), stats
 
     async def get_card(self, url: str) -> tuple[str, str | None]:
         raw, headers, _ = await self._request("GET", url)

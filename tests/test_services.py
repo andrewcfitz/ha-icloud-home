@@ -8,7 +8,7 @@ from custom_components.icloud_home import vcard
 from custom_components.icloud_home.const import DOMAIN, NOMINATIM_URL
 from custom_components.icloud_home.diagnostics import async_get_config_entry_diagnostics
 
-from .conftest import ME, ME_URL, mock_icloud
+from .conftest import ME, mock_icloud
 
 GEOCODED = {
     "Sub Thoroughfare": "123",
@@ -57,7 +57,7 @@ async def test_geocoded_sensor_address_is_written(hass: HomeAssistant, aioclient
         },
     }
     [(url, body, headers)] = puts(aioclient_mock)
-    assert str(url) == ME_URL
+    assert url.path == "/1/carddav/card/me.vcf"
     assert headers["If-Match"] == '"e1"'
     assert "123 Campground Ln;Fredericksburg;TX;78624;United States" in vcard.unfold(body.decode())
     assert b"9 Work St" in body
@@ -143,3 +143,22 @@ async def test_diagnostics_redact_credentials(hass: HomeAssistant, aioclient_moc
     diag = await async_get_config_entry_diagnostics(hass, config_entry)
     assert "abcd" not in str(diag)
     assert "pat@example.com" not in str(diag)
+    assert diag["contacts"] == {
+        "address_books": 2,
+        "card_urls": 7,
+        "cards_fetched": 7,
+        "groups": 1,
+        "unnamed": 1,
+        "listed": 5,
+        "selected_card_found": True,
+    }
+    assert "Pat" not in str(diag)
+    assert "carddav" not in str(diag)
+
+
+async def test_diagnostics_scrub_urls_from_errors(hass: HomeAssistant, aioclient_mock, config_entry):
+    mock_icloud(aioclient_mock, auth_ok=False)
+    await setup(hass, config_entry)
+    diag = await async_get_config_entry_diagnostics(hass, config_entry)
+    assert diag["contacts"]["error"].startswith("AuthError")
+    assert "icloud.com" not in str(diag)

@@ -27,7 +27,15 @@ async def test_user_flow_asks_for_credentials_then_card(hass: HomeAssistant, aio
     result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDS)
     assert result["step_id"] == "card"
     options = result["data_schema"].schema[CONF_CARD_URL].config["options"]
-    assert [o["label"] for o in options] == ["Aaron Other", "Pat Tester"]
+    # Second address book, N-only and ORG-only cards, and a card the multiget
+    # skipped all make the list; groups and nameless cards don't.
+    assert [o["label"] for o in options] == [
+        "Aaron Other",
+        "Acme RV Park",
+        "Jo Smith",
+        "Pat Tester",
+        "Zed Skipped",
+    ]
 
     # iCloud's addressbook-home-set carries an explicit :443, so the stored
     # URL is whatever the server handed back, not ME_URL verbatim.
